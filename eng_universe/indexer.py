@@ -124,7 +124,7 @@ async def create_search_index(redis_client: redis.Redis, index_name: str) -> Non
             "embedding",
             "VECTOR",
             "HNSW",
-            "12",
+            "6",
             "TYPE",
             "FLOAT32",
             "DIM",

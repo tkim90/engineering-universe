@@ -30,7 +30,7 @@ FT.CREATE idx:blogs ON HASH PREFIX 1 doc: SCHEMA \
   published_at TEXT \
   url TEXT \
   lang TAG SEPARATOR , \
-  embedding VECTOR HNSW 12 TYPE FLOAT32 DIM 384 DISTANCE_METRIC COSINE
+  embedding VECTOR HNSW 6 TYPE FLOAT32 DIM 384 DISTANCE_METRIC COSINE
 ```
 
 ## Query Templates
@@ -47,7 +47,8 @@ FT.SEARCH idx:blogs "@title|content:redis" LIMIT 0 10
 FT.SEARCH idx:blogs "(@title|content:redis)=>[KNN 10 @embedding $vec AS vector_score]" \
   PARAMS 2 vec $vector_bytes \
   SORTBY vector_score \
-  RETURN 3 title url vector_score
+  RETURN 3 title url vector_score \
+  DIALECT 2
 ```
 
 ### Filters

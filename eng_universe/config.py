@@ -48,5 +48,7 @@ class Settings:
     crawl_delay_default_s = int(os.getenv("CRAWL_DELAY_DEFAULT_S", 5))
     embeddings_provider = os.getenv("EMBEDDINGS_PROVIDER", "dummy")
     embeddings_dim = int(os.getenv("EMBEDDINGS_DIM", 384))
+    indexer_exit_on_idle = env_bool("INDEXER_EXIT_ON_IDLE", "true")
+    indexer_idle_grace_s = float(os.getenv("INDEXER_IDLE_GRACE_S", "2"))
     metrics_port = int(os.getenv("METRICS_PORT", 9100))
     api_port = int(os.getenv("API_PORT", 8080))

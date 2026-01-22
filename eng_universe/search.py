@@ -37,6 +37,8 @@ async def search(
             "2",
             "title",
             "url",
+            "DIALECT",
+            "2",
         ]
     else:
         provider = get_embedding_provider()
@@ -59,6 +61,8 @@ async def search(
             "title",
             "url",
             "vector_score",
+            "DIALECT",
+            "2",
         ]
     raw = await redis_client.execute_command(*args)
     results = []

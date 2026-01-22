@@ -7,7 +7,7 @@ services:
       - redis-data:/data
     command:
       [
-        "redis-server",
+        "redis-stack-server",
         "--save",
         "60",
         "1",
@@ -33,6 +33,7 @@ services:
     command: ["python", "main.py", "index"]
     environment:
       REDIS_URL: redis://default:devpass@redis:6379/0
+      INDEXER_EXIT_ON_IDLE: "false"
     depends_on:
       - redis
     profiles: ["indexer"]

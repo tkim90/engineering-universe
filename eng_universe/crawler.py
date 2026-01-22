@@ -216,8 +216,8 @@ def url_hash(url: str) -> str:
 
 def storage_paths(base_dir: Path, doc_id: int, url: str) -> tuple[Path, Path]:
     digest = url_hash(url)
-    raw_path = base_dir / "raw" / str(doc_id) / f"{digest}.html"
-    cleaned_path = base_dir / "cleaned" / str(doc_id) / f"{digest}.html"
+    raw_path = base_dir / str(doc_id) / f"raw_{digest}.html"
+    cleaned_path = base_dir / str(doc_id) / f"clean_{digest}.html"
     return raw_path, cleaned_path
 
 

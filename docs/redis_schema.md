@@ -15,8 +15,8 @@
 ## Disk Storage
 
 - Raw and cleaned HTML are stored under `CRAWL_STORAGE_DIR` using:
-  - `raw/{doc_id}/{url_hash}.html`
-  - `cleaned/{doc_id}/{url_hash}.html`
+  - `{doc_id}/raw_{url_hash}.html`
+  - `{doc_id}/clean_{url_hash}.html`
 
 ## RediSearch Index
 

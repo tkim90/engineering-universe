@@ -10,24 +10,49 @@ from eng_universe.config import Settings
 class CrawlItem:
     url: str
     source: str
+    depth: int = 0
 
 
-async def enqueue(redis_client: redis.Redis, item: CrawlItem) -> None:
-    await redis_client.rpush(Settings.crawl_queue_key, f"{item.url}\t{item.source}")
+def _serialize(item: CrawlItem) -> str:
+    return f"{item.url}\t{item.source}\t{item.depth}"
+
+
+def _deserialize(raw: bytes) -> CrawlItem | None:
+    parts = raw.decode().split("\t")
+    if len(parts) < 2:
+        return None
+    url = parts[0]
+    source = parts[1]
+    depth = 0
+    if len(parts) > 2:
+        try:
+            depth = int(parts[2])
+        except ValueError:
+            depth = 0
+    return CrawlItem(url=url, source=source, depth=depth)
+
+
+async def enqueue(
+    redis_client: redis.Redis, item: CrawlItem, *, dedupe: bool = True
+) -> None:
+    if dedupe:
+        added = await redis_client.sadd(Settings.crawl_seen_key, item.url)
+        if not added:
+            return
+    await redis_client.rpush(Settings.crawl_queue_key, _serialize(item))
 
 
 async def dequeue(redis_client: redis.Redis) -> CrawlItem | None:
     raw = await redis_client.lpop(Settings.crawl_queue_key)
     if raw is None:
         return None
-    url, source = raw.decode().split("\t", 1)
-    return CrawlItem(url=url, source=source)
+    return _deserialize(raw)
 
 
 async def delay(redis_client: redis.Redis, item: CrawlItem, when_ts: int) -> None:
     await redis_client.zadd(
         Settings.crawl_delay_key,
-        {f"{item.url}\t{item.source}": float(when_ts)},
+        {_serialize(item): float(when_ts)},
     )
 
 

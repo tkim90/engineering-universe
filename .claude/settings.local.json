@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:airbnb.tech)",
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:blog.cloudflare.com)",
+      "WebFetch(domain:developers.googleblog.com)",
+      "WebFetch(domain:www.notion.com)",
+      "WebFetch(domain:cursor.com)",
+      "WebFetch(domain:shopify.engineering)",
+      "WebFetch(domain:netflixtechblog.com)",
+      "WebFetch(domain:github.blog)",
+      "WebFetch(domain:engineering.atspotify.com)",
+      "WebFetch(domain:slack.engineering)",
+      "WebFetch(domain:stripe.com)",
+      "WebFetch(domain:www.uber.com)",
+      "WebFetch(domain:engineering.fb.com)",
+      "WebFetch(domain:netflixtechblog.medium.com)",
+      "WebFetch(domain:builders.ramp.com)"
+    ]
+  }
+}

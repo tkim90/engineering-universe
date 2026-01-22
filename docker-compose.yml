@@ -5,13 +5,23 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    command:
+      [
+        "redis-server",
+        "--save",
+        "60",
+        "1",
+        "--appendonly",
+        "no",
+        "--requirepass",
+        "devpass",
+      ]
 
   crawler:
     build: .
     command: ["python", "main.py", "crawl"]
     environment:
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://default:devpass@redis:6379/0
       CRAWLER_CONCURRENCY: "200"
       SEED_START_URLS: "https://engineering.fb.com/,https://builders.ramp.com/,https://www.anthropic.com/engineering,https://developers.openai.com/blog/"
     depends_on:
@@ -22,7 +32,7 @@ services:
     build: .
     command: ["python", "main.py", "index"]
     environment:
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://default:devpass@redis:6379/0
     depends_on:
       - redis
     profiles: ["indexer"]
@@ -33,7 +43,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://default:devpass@redis:6379/0
     depends_on:
       - redis
     profiles: ["api"]
@@ -51,7 +61,7 @@ services:
     build: .
     command: ["python", "main.py", "seed"]
     environment:
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://default:devpass@redis:6379/0
       SEED_START_URLS: "https://engineering.fb.com/,https://builders.ramp.com/,https://www.anthropic.com/engineering,https://developers.openai.com/blog/"
     depends_on:
       - redis

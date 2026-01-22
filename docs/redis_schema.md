@@ -2,13 +2,21 @@
 
 ## Keys
 
-- `crawl:queue` list of URL events (`url\\tsource`).
+- `crawl:queue` list of URL events (`url\\tsource\\tdepth`).
 - `crawl:delay` sorted set for delayed URLs (score = next_allowed_ts).
-- `raw:queue` list of raw document IDs.
-- `raw:{doc_id}` hash of raw HTML.
+- `crawl:seen` set of normalized URLs that were enqueued.
+- `crawl:doc_seq` integer sequence for crawl doc IDs.
+- `crawl:doc:{doc_id}` hash of crawl metadata (url, domain, paths, depth, status).
+- `raw:queue` list of crawl document IDs ready for indexing.
 - `doc:{doc_id}` hash of indexed document fields.
 - `robots:{domain}` hash of robots rules.
 - `robots:next_allowed:{domain}` string unix timestamp.
+
+## Disk Storage
+
+- Raw and cleaned HTML are stored under `CRAWL_STORAGE_DIR` using:
+  - `raw/{doc_id}/{url_hash}.html`
+  - `cleaned/{doc_id}/{url_hash}.html`
 
 ## RediSearch Index
 

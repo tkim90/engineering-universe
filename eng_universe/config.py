@@ -48,6 +48,23 @@ class Settings:
     crawl_delay_default_s = int(os.getenv("CRAWL_DELAY_DEFAULT_S", 5))
     embeddings_provider = os.getenv("EMBEDDINGS_PROVIDER", "dummy")
     embeddings_dim = int(os.getenv("EMBEDDINGS_DIM", 384))
+    huggingface_api_key = os.getenv("HUGGINGFACE_API_KEY", "")
+    huggingface_base_url = os.getenv(
+        "HUGGINGFACE_BASE_URL", "https://router.huggingface.co/v1"
+    )
+    huggingface_provider = os.getenv("HUGGINGFACE_PROVIDER", "auto")
+    huggingface_embedding_model = os.getenv(
+        "HUGGINGFACE_EMBEDDINGS_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+    )
+    pylate_model_name = os.getenv(
+        "PYLATE_MODEL_NAME", "mixedbread-ai/mxbai-edge-colbert-v0-17m"
+    )
+    pylate_index_folder = os.getenv("PYLATE_INDEX_FOLDER", "pylate-index")
+    pylate_index_name = os.getenv("PYLATE_INDEX_NAME", "index")
+    pylate_batch_size = int(os.getenv("PYLATE_BATCH_SIZE", 32))
+    pylate_device = os.getenv("PYLATE_DEVICE", "")
+    pylate_show_progress = env_bool("PYLATE_SHOW_PROGRESS", "false")
+    debug_search = env_bool("DEBUG_SEARCH", "false")
     indexer_exit_on_idle = env_bool("INDEXER_EXIT_ON_IDLE", "true")
     indexer_idle_grace_s = float(os.getenv("INDEXER_IDLE_GRACE_S", "2"))
     metrics_port = int(os.getenv("METRICS_PORT", 9100))

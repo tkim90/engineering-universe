@@ -15,7 +15,8 @@ def main() -> None:
     sub.add_parser("seed", help="Seed the crawl queue")
     sub.add_parser("crawl", help="Run crawler workers")
     sub.add_parser("index", help="Run indexer workers")
-    sub.add_parser("init-index", help="Create Redis search index")
+    sub.add_parser("init-index", help="Initialize search index")
+    sub.add_parser("reindex", help="Initialize search index and run indexer")
     sub.add_parser("metrics", help="Run Prometheus metrics server")
 
     args = parser.parse_args()
@@ -37,6 +38,16 @@ def main() -> None:
 
         redis_client = redis.from_url(Settings.redis_url)
         asyncio.run(create_search_index(redis_client, "idx:blogs"))
+        return
+    if args.command == "reindex":
+        import redis.asyncio as redis
+
+        async def _reindex() -> None:
+            redis_client = redis.from_url(Settings.redis_url)
+            await create_search_index(redis_client, "idx:blogs")
+            await index_worker()
+
+        asyncio.run(_reindex())
         return
     if args.command == "metrics":
         run_metrics_server()

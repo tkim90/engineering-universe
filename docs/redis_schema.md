@@ -1,5 +1,8 @@
 # Redis Schema and Queries
 
+When `EMBEDDINGS_PROVIDER=pylate`, Redis still stores document metadata, but vector
+search uses a local PLAID index on disk instead of RediSearch.
+
 ## Keys
 
 - `crawl:queue` list of URL events (`url\\tsource\\tdepth`).

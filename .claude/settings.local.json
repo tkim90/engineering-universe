@@ -18,7 +18,8 @@
       "WebFetch(domain:www.uber.com)",
       "WebFetch(domain:engineering.fb.com)",
       "WebFetch(domain:netflixtechblog.medium.com)",
-      "WebFetch(domain:builders.ramp.com)"
+      "WebFetch(domain:builders.ramp.com)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

@@ -1,0 +1,15 @@
+[project]
+name = "eng-universe"
+version = "0.1.0"
+description = "Engineering blog crawler and hybrid search"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9.0",
+    "beautifulsoup4>=4.12.0",
+    "fastapi>=0.115.0",
+    "prometheus-client>=0.20.0",
+    "pydantic>=2.8.0",
+    "redis>=5.0.0",
+    "uvicorn>=0.30.0",
+]

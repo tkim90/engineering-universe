@@ -1,3 +1,4 @@
+import logging
 import struct
 from dataclasses import dataclass
 
@@ -8,6 +9,19 @@ from eng_universe.embeddings import get_embedding_provider
 from eng_universe.entities import extract_topics
 from eng_universe.etl import ParsedDocument
 from eng_universe.metrics import record_index
+
+LOGGER = logging.getLogger("indexer")
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%H:%M:%S"
+    )
+
+
+def log_event(event: str, **fields: object) -> None:
+    if not Settings.crawl_log:
+        return
+    parts = " ".join(f"{key}={value}" for key, value in fields.items())
+    LOGGER.info("%-8s %s", event.upper(), parts)
 
 
 @dataclass
@@ -32,6 +46,7 @@ def vector_to_bytes(vector: list[float]) -> bytes:
 async def index_document(
     redis_client: redis.Redis, doc: ParsedDocument, source: str
 ) -> None:
+    log_event("index", url=doc.url, title=doc.title, source=source)
     provider = get_embedding_provider()
     embedding = provider.embed(f"{doc.title}\n{doc.content}")
     record = IndexRecord(

@@ -14,7 +14,32 @@ class SearchResult:
     doc_id: str
     title: str
     url: str
+    snippet: str
+    authors: list[str]
+    company: str
+    published_at: str | None
     score: float
+
+
+def _make_snippet(content: str, query: str, max_len: int = 200) -> str:
+    if not content:
+        return ""
+    normalized = " ".join(content.split())
+    if not query:
+        return normalized[:max_len]
+    lower_content = normalized.lower()
+    lower_query = query.lower()
+    match_index = lower_content.find(lower_query)
+    if match_index == -1:
+        return normalized[:max_len]
+    start = max(match_index - max_len // 3, 0)
+    end = min(start + max_len, len(normalized))
+    snippet = normalized[start:end]
+    if start > 0:
+        snippet = f"…{snippet}"
+    if end < len(normalized):
+        snippet = f"{snippet}…"
+    return snippet
 
 
 async def search(
@@ -34,9 +59,13 @@ async def search(
             "0",
             str(limit),
             "RETURN",
-            "2",
+            "6",
             "title",
             "url",
+            "content",
+            "authors",
+            "company",
+            "published_at",
             "DIALECT",
             "2",
         ]
@@ -57,9 +86,13 @@ async def search(
             "SORTBY",
             "vector_score",
             "RETURN",
-            "3",
+            "7",
             "title",
             "url",
+            "content",
+            "authors",
+            "company",
+            "published_at",
             "vector_score",
             "DIALECT",
             "2",
@@ -74,11 +107,18 @@ async def search(
                 fields[j].decode(): fields[j + 1].decode()
                 for j in range(0, len(fields), 2)
             }
+            authors_raw = mapping.get("authors", "")
+            authors = [item.strip() for item in authors_raw.split(",") if item.strip()]
+            content = mapping.get("content", "")
             results.append(
                 SearchResult(
                     doc_id=doc_id,
                     title=mapping.get("title", ""),
                     url=mapping.get("url", ""),
+                    snippet=_make_snippet(content, query),
+                    authors=authors,
+                    company=mapping.get("company", ""),
+                    published_at=mapping.get("published_at") or None,
                     score=float(mapping.get("vector_score", "0")),
                 )
             )

@@ -7,6 +7,35 @@ const apiBase = window.location.protocol === "file:" ? "http://localhost:8080" :
 let debounceTimer = null;
 let lastRequestId = 0;
 
+const formatAuthors = (authors) => {
+  if (Array.isArray(authors)) {
+    return authors.length ? authors.join(", ") : "Unknown";
+  }
+  if (typeof authors === "string") {
+    const parts = authors
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return parts.length ? parts.join(", ") : "Unknown";
+  }
+  return "Unknown";
+};
+
+const formatDate = (value) => {
+  if (!value) {
+    return "Unknown";
+  }
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  }
+  return value;
+};
+
 const runSearch = async () => {
   const query = queryInput.value.trim();
   const mode = modeSelect.value;
@@ -29,14 +58,32 @@ const runSearch = async () => {
   if (requestId !== lastRequestId) {
     return;
   }
-  status.textContent = `${payload.count} results`;
+  const duration =
+    typeof payload.duration_ms === "number"
+      ? ` · ${payload.duration_ms} ms`
+      : "";
+  status.textContent = `${payload.count} results${duration}`;
   payload.results.forEach((item) => {
     const li = document.createElement("li");
+    li.className = "result";
     const link = document.createElement("a");
     link.href = item.url || "#";
     link.textContent = item.title || item.doc_id;
     link.target = "_blank";
+    link.className = "result__title";
+    const meta = document.createElement("div");
+    meta.className = "result__meta";
+    meta.textContent = `Author: ${formatAuthors(item.authors)} · Date: ${formatDate(
+      item.published_at
+    )} · Company: ${item.company || "Unknown"}`;
+    const snippet = document.createElement("p");
+    snippet.className = "result__snippet";
+    snippet.textContent = item.snippet || "";
     li.appendChild(link);
+    li.appendChild(meta);
+    if (snippet.textContent) {
+      li.appendChild(snippet);
+    }
     resultsList.appendChild(li);
   });
 };

@@ -13,9 +13,9 @@ from bs4 import BeautifulSoup
 import redis.asyncio as redis
 
 from eng_universe.config import Settings
-from eng_universe.metrics import record_crawl
-from eng_universe.queue import CrawlItem, delay, dequeue, enqueue, promote_due
-from eng_universe.robots import (
+from eng_universe.monitoring.metrics import record_crawl
+from eng_universe.ingest.queue import CrawlItem, delay, dequeue, enqueue, promote_due
+from eng_universe.ingest.robots import (
     get_or_fetch_robots,
     parse_domain,
     reserve_next_allowed,

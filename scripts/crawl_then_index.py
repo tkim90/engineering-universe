@@ -13,8 +13,8 @@ import aiohttp
 import redis.asyncio as redis
 
 from eng_universe.config import Settings
-from eng_universe.crawler import crawl_worker
-from eng_universe.pipeline import index_worker
+from eng_universe.ingest.crawler import crawl_worker
+from eng_universe.index.pipeline import index_worker
 
 
 async def main() -> None:

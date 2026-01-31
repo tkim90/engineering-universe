@@ -4,12 +4,12 @@ from dataclasses import dataclass
 
 import redis.asyncio as redis
 
-from eng_universe.config import Settings
-from eng_universe.embeddings import get_embedding_provider, normalize_embedding
-from eng_universe.entities import extract_topics
-from eng_universe.etl import ParsedDocument
-from eng_universe.metrics import record_index
-from eng_universe.pylate_backend import add_documents as pylate_add_documents
+from eng_universe.config import KeywordFieldConfig, Settings
+from eng_universe.search.embeddings import get_embedding_provider, normalize_embedding
+from eng_universe.index.entities import extract_topics
+from eng_universe.ingest.etl import ParsedDocument
+from eng_universe.monitoring.metrics import record_index
+from eng_universe.search.pylate_backend import add_documents as pylate_add_documents
 
 LOGGER = logging.getLogger("indexer")
 if not logging.getLogger().handlers:
@@ -44,19 +44,34 @@ def vector_to_bytes(vector: list[float]) -> bytes:
     return struct.pack(f"{len(vector)}f", *vector)
 
 
+def _schema_for_field(field: KeywordFieldConfig) -> list[object]:
+    parts: list[object] = [field.name, field.field_type]
+    if field.field_type == "TEXT":
+        if field.weight is not None:
+            parts.extend(["WEIGHT", str(field.weight)])
+        if field.nostem:
+            parts.append("NOSTEM")
+        if field.phonetic:
+            parts.extend(["PHONETIC", field.phonetic])
+    elif field.field_type == "TAG":
+        parts.extend(["SEPARATOR", ","])
+    return parts
+
+
 async def index_document(
     redis_client: redis.Redis, doc: ParsedDocument, source: str
 ) -> None:
     log_event("index", url=doc.url, title=doc.title, source=source)
     embedding_bytes: bytes | None = None
     provider_name = Settings.embeddings_provider.lower()
-    if provider_name in {"pylate", "colbert"}:
-        pylate_add_documents([doc.url], [f"{doc.title}\n{doc.content}"])
-    else:
-        provider = get_embedding_provider()
-        embedding = provider.embed(f"{doc.title}\n{doc.content}")
-        vector = normalize_embedding(embedding.vector, Settings.embeddings_dim)
-        embedding_bytes = vector_to_bytes(vector)
+    if not Settings.keyword_only:
+        if provider_name in {"pylate", "colbert"}:
+            pylate_add_documents([doc.url], [f"{doc.title}\n{doc.content}"])
+        else:
+            provider = get_embedding_provider()
+            embedding = provider.embed(f"{doc.title}\n{doc.content}")
+            vector = normalize_embedding(embedding.vector, Settings.embeddings_dim)
+            embedding_bytes = vector_to_bytes(vector)
     record = IndexRecord(
         doc_id=doc.url,
         title=doc.title,
@@ -82,6 +97,22 @@ async def index_document(
         "url": record.url,
         "lang": record.lang or "",
     }
+    keyword_field_names = [field.name for field in Settings.keyword_fields]
+    if keyword_field_names:
+        existing_values = await redis_client.hmget(
+            f"doc:{record.doc_id}", keyword_field_names
+        )
+        for name, value in zip(keyword_field_names, existing_values):
+            if mapping.get(name):
+                continue
+            if value is None:
+                continue
+            if isinstance(value, (bytes, bytearray)):
+                decoded = value.decode()
+            else:
+                decoded = str(value)
+            if decoded:
+                mapping[name] = decoded
     if record.embedding is not None:
         mapping["embedding"] = record.embedding
     await redis_client.hset(f"doc:{record.doc_id}", mapping=mapping)
@@ -91,7 +122,7 @@ async def index_document(
 async def create_search_index(redis_client: redis.Redis, index_name: str) -> None:
     provider_name = Settings.embeddings_provider.lower()
     if provider_name in {"pylate", "colbert"}:
-        from eng_universe.pylate_backend import create_plaid_index
+        from eng_universe.search.pylate_backend import create_plaid_index
 
         log_event(
             "init-index",
@@ -108,37 +139,24 @@ async def create_search_index(redis_client: redis.Redis, index_name: str) -> Non
             index=index_name,
             dim=vector_dim,
         )
-        schema = [
-            "title",
-            "TEXT",
-            "content",
-            "TEXT",
-            "topics",
-            "TAG",
-            "SEPARATOR",
-            ",",
-            "source",
-            "TAG",
-            "SEPARATOR",
-            ",",
-            "company",
-            "TAG",
-            "SEPARATOR",
-            ",",
-            "authors",
-            "TAG",
-            "SEPARATOR",
-            ",",
-            "published_at",
-            "TEXT",
-            "url",
-            "TEXT",
-            "lang",
-            "TAG",
-            "SEPARATOR",
-            ",",
-        ]
-        if provider_name not in {"pylate", "colbert"}:
+        schema: list[object] = []
+        keyword_fields = Settings.keyword_fields
+        keyword_names = {field.name for field in keyword_fields}
+        for field in keyword_fields:
+            schema.extend(_schema_for_field(field))
+        for name, field_type in (
+            ("topics", "TAG"),
+            ("source", "TAG"),
+            ("company", "TAG"),
+            ("authors", "TAG"),
+            ("published_at", "TEXT"),
+            ("url", "TEXT"),
+            ("lang", "TAG"),
+        ):
+            if name in keyword_names:
+                continue
+            schema.extend(_schema_for_field(KeywordFieldConfig(name=name, field_type=field_type)))
+        if not Settings.keyword_only and provider_name not in {"pylate", "colbert"}:
             schema.extend(
                 [
                     "embedding",

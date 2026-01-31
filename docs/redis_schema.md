@@ -23,9 +23,21 @@ search uses a local PLAID index on disk instead of RediSearch.
 
 ## RediSearch Index
 
+When `KEYWORD_ONLY=true`, the schema omits the `embedding` vector field and
+keyword search runs without embeddings.
+
 ```
 FT.CREATE idx:blogs ON HASH PREFIX 1 doc: SCHEMA \
-  title TEXT content TEXT \
+  title TEXT WEIGHT 2 \
+  description TEXT WEIGHT 1 \
+  subject TEXT WEIGHT 2 NOSTEM \
+  catalogNumber TEXT WEIGHT 2 NOSTEM \
+  instructor TEXT WEIGHT 1 NOSTEM PHONETIC dm:en \
+  component TAG SEPARATOR , \
+  level TAG SEPARATOR , \
+  genEdArea TAG SEPARATOR , \
+  academicYear NUMERIC \
+  content TEXT WEIGHT 1 \
   topics TAG SEPARATOR , \
   source TAG SEPARATOR , \
   company TAG SEPARATOR , \
@@ -41,7 +53,7 @@ FT.CREATE idx:blogs ON HASH PREFIX 1 doc: SCHEMA \
 ### Keyword (BM25)
 
 ```
-FT.SEARCH idx:blogs "@title|content:redis" LIMIT 0 10
+FT.SEARCH idx:blogs "@title|description|subject|catalogNumber|instructor|content:redis" LIMIT 0 10
 ```
 
 ### Vector + Keyword (Hybrid)

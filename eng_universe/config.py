@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
@@ -16,6 +17,31 @@ def env(name: str, default: str | None = None) -> str:
 def env_bool(name: str, default: str = "false") -> bool:
     value = os.getenv(name, default).strip().lower()
     return value in {"1", "true", "yes", "y", "on"}
+
+
+@dataclass(frozen=True)
+class KeywordFieldConfig:
+    name: str
+    field_type: str
+    weight: float | None = None
+    nostem: bool = False
+    phonetic: str | None = None
+
+
+KEYWORD_FIELDS: list[KeywordFieldConfig] = [
+    KeywordFieldConfig(name="title", field_type="TEXT", weight=2.0),
+    KeywordFieldConfig(name="description", field_type="TEXT", weight=1.0),
+    KeywordFieldConfig(name="subject", field_type="TEXT", weight=2.0, nostem=True),
+    KeywordFieldConfig(name="catalogNumber", field_type="TEXT", weight=2.0, nostem=True),
+    KeywordFieldConfig(
+        name="instructor", field_type="TEXT", weight=1.0, nostem=True, phonetic="dm:en"
+    ),
+    KeywordFieldConfig(name="component", field_type="TAG"),
+    KeywordFieldConfig(name="level", field_type="TAG"),
+    KeywordFieldConfig(name="genEdArea", field_type="TAG"),
+    KeywordFieldConfig(name="academicYear", field_type="NUMERIC"),
+    KeywordFieldConfig(name="content", field_type="TEXT", weight=1.0),
+]
 
 
 class Settings:
@@ -48,6 +74,8 @@ class Settings:
     crawl_delay_default_s = int(os.getenv("CRAWL_DELAY_DEFAULT_S", 5))
     embeddings_provider = os.getenv("EMBEDDINGS_PROVIDER", "dummy")
     embeddings_dim = int(os.getenv("EMBEDDINGS_DIM", 384))
+    keyword_only = env_bool("KEYWORD_ONLY", "false")
+    keyword_fields = KEYWORD_FIELDS
     huggingface_api_key = os.getenv("HUGGINGFACE_API_KEY", "")
     huggingface_base_url = os.getenv(
         "HUGGINGFACE_BASE_URL", "https://router.huggingface.co/v1"

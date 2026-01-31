@@ -19,7 +19,12 @@
       "WebFetch(domain:engineering.fb.com)",
       "WebFetch(domain:netflixtechblog.medium.com)",
       "WebFetch(domain:builders.ramp.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(ls:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(python:*)",
+      "Bash(uv run python:*)",
+      "Bash(ln:*)"
     ]
   }
 }

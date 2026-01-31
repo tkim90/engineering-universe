@@ -1,7 +1,7 @@
 import asyncio
 
 from eng_universe.config import Settings
-from eng_universe.crawler import seed_queue
+from eng_universe.ingest.crawler import seed_queue
 
 
 async def main() -> None:

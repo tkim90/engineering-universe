@@ -11,8 +11,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from eng_universe.config import Settings
-from eng_universe.etl import parse_html
-from eng_universe.indexer import index_document
+from eng_universe.ingest.etl import parse_html
+from eng_universe.index.indexer import index_document
 
 
 def read_text(path: str) -> str:

@@ -8,9 +8,9 @@ from dataclasses import dataclass
 import redis.asyncio as redis
 
 from eng_universe.config import Settings
-from eng_universe.embeddings import get_embedding_provider, normalize_embedding
-from eng_universe.metrics import SEARCH_LATENCY_MS
-from eng_universe.pylate_backend import retrieve as pylate_retrieve
+from eng_universe.search.embeddings import get_embedding_provider, normalize_embedding
+from eng_universe.monitoring.metrics import SEARCH_LATENCY_MS
+from eng_universe.search.pylate_backend import retrieve as pylate_retrieve
 
 LOGGER = logging.getLogger("search")
 if not logging.getLogger().handlers:
@@ -63,7 +63,11 @@ def _build_text_query(query: str) -> str:
     cleaned = query.strip()
     if not cleaned:
         return "*"
-    return f"@title|content:({_escape_redis_query(cleaned)})"
+    fields = [field.name for field in Settings.keyword_fields if field.field_type == "TEXT"]
+    if not fields:
+        fields = ["title", "content"]
+    field_expr = "|".join(fields)
+    return f"@{field_expr}:({_escape_redis_query(cleaned)})"
 
 
 def _decode_value(value: object) -> str:
@@ -118,6 +122,8 @@ async def search(
     query = query.strip()
     if not query:
         return []
+    if Settings.keyword_only and mode != "keyword":
+        mode = "keyword"
     provider_name = Settings.embeddings_provider.lower()
     if Settings.debug_search:
         LOGGER.info(

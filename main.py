@@ -2,10 +2,10 @@ import argparse
 import asyncio
 
 from eng_universe.config import Settings
-from eng_universe.crawler import run_crawlers, seed_queue
-from eng_universe.indexer import create_search_index
-from eng_universe.metrics_server import run_metrics_server
-from eng_universe.pipeline import index_worker
+from eng_universe.ingest.crawler import run_crawlers, seed_queue
+from eng_universe.index.indexer import create_search_index
+from eng_universe.monitoring.metrics_server import run_metrics_server
+from eng_universe.index.pipeline import index_worker
 
 
 def main() -> None:

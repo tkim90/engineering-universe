@@ -6,8 +6,8 @@ from pathlib import Path
 import redis.asyncio as redis
 
 from eng_universe.config import Settings
-from eng_universe.etl import parse_html
-from eng_universe.indexer import index_document, log_event
+from eng_universe.ingest.etl import parse_html
+from eng_universe.index.indexer import index_document, log_event
 
 
 def _read_text(path: str) -> str:

@@ -13,7 +13,7 @@ Combines keyword (BM25) and semantic search for hybrid results.
 ## Quickstart
 
 1. Set `REDIS_URL` and optional embedding provider env vars
-2. `python main.py seed && python main.py crawl`
+2. `python main.py seed && python main.py crawl` (optional: `--max-docs N --concurrency K`)
 3. `python main.py index`
 4. `uvicorn api.search:app --reload`
 

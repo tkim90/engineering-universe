@@ -17,7 +17,19 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("seed", help="Seed the crawl queue")
-    sub.add_parser("crawl", help="Run crawler workers")
+    crawl_parser = sub.add_parser("crawl", help="Run crawler workers")
+    crawl_parser.add_argument(
+        "--max-docs",
+        type=int,
+        default=None,
+        help="Max docs to store before stopping (default: no limit)",
+    )
+    crawl_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=None,
+        help="Number of crawler workers to run (default: CRAWLER_CONCURRENCY)",
+    )
     sub.add_parser("index", help="Run indexer workers")
     sub.add_parser("init-index", help="Initialize search index")
     sub.add_parser("reindex", help="Initialize search index and run indexer")
@@ -33,7 +45,9 @@ def main() -> None:
                 asyncio.run(seed_queue(url))
         return
     if args.command == "crawl":
-        asyncio.run(run_crawlers())
+        if args.concurrency is not None:
+            Settings.max_concurrency = max(1, args.concurrency)
+        asyncio.run(run_crawlers(max_docs=args.max_docs))
         return
     if args.command == "index":
         asyncio.run(index_worker())

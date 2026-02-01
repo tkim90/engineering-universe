@@ -1,6 +1,7 @@
 # Eng Universe
 
-Search engine for engineering blogs from Meta, Ramp, Anthropic, and OpenAI.
+Search engine for engineering blogs from companies like Meta, Anthropic, and OpenAI.
+
 Combines keyword (BM25) and semantic search for hybrid results.
 
 ## Features

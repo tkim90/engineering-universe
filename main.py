@@ -4,8 +4,12 @@ import asyncio
 from eng_universe.config import Settings
 from eng_universe.ingest.crawler import run_crawlers, seed_queue
 from eng_universe.index.indexer import create_search_index
+from eng_universe.monitoring.logging_utils import get_event_logger
 from eng_universe.monitoring.metrics_server import run_metrics_server
 from eng_universe.index.pipeline import index_worker
+
+
+log_event = get_event_logger("main")
 
 
 def main() -> None:
@@ -23,6 +27,7 @@ def main() -> None:
 
     if args.command == "seed":
         for url in Settings.seed_start_urls.split(","):
+            log_event("cmd:seed", url=url)
             url = url.strip()
             if url:
                 asyncio.run(seed_queue(url))

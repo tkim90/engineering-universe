@@ -1,7 +1,6 @@
 import asyncio
 from dataclasses import dataclass
 import hashlib
-import logging
 from pathlib import Path
 import re
 import time
@@ -13,6 +12,7 @@ from bs4 import BeautifulSoup
 import redis.asyncio as redis
 
 from eng_universe.config import Settings
+from eng_universe.monitoring.logging_utils import get_event_logger
 from eng_universe.monitoring.metrics import record_crawl
 from eng_universe.ingest.queue import CrawlItem, delay, dequeue, enqueue, promote_due
 from eng_universe.ingest.robots import (
@@ -32,18 +32,8 @@ class CrawlResult:
 
 UNWANTED_TAGS = ("nav", "footer", "aside", "script", "style", "noscript")
 
-LOGGER = logging.getLogger("crawler")
-if not logging.getLogger().handlers:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%H:%M:%S"
-    )
+log_event = get_event_logger("crawler")
 
-
-def log_event(event: str, **fields: object) -> None:
-    if not Settings.crawl_log:
-        return
-    parts = " ".join(f"{key}={value}" for key, value in fields.items())
-    LOGGER.info("%-8s %s", event.upper(), parts)
 
 ALLOWED_URL_PATTERNS: dict[str, list[re.Pattern[str]]] = {
     "engineering.fb.com": [
@@ -172,6 +162,7 @@ def is_listing_url(url: str) -> bool:
 
 def sitemap_urls_for_domain(domain: str) -> set[str]:
     if domain not in ALLOWED_URL_PATTERNS:
+        print(f"[sitemap_urls_for_domain] Ignored {domain}")
         return set()
     paths = SITEMAP_PATHS.get(domain, DEFAULT_SITEMAP_PATHS)
     return {f"https://{domain}{path}" for path in paths}
@@ -399,10 +390,14 @@ async def run_crawlers(
 async def seed_queue(seed_url: str, source: str = "seed") -> None:
     redis_client = redis.from_url(Settings.redis_url)
     normalized = normalize_url(seed_url)
+    log_event("seed_queue", normalized_url=normalized)
     if not normalized:
         return
     await enqueue(redis_client, CrawlItem(url=normalized, source=source, depth=0))
     for sitemap_url in sitemap_urls_for_domain(parse_domain(normalized)):
+        log_event(
+            "seed_queue", domain=parse_domain(normalized), sitemap_url=sitemap_url
+        )
         await enqueue(
             redis_client,
             CrawlItem(url=sitemap_url, source="sitemap", depth=0),

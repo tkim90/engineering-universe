@@ -1,4 +1,3 @@
-import logging
 import struct
 from dataclasses import dataclass
 
@@ -8,21 +7,11 @@ from eng_universe.config import KeywordFieldConfig, Settings
 from eng_universe.search.embeddings import get_embedding_provider, normalize_embedding
 from eng_universe.index.entities import extract_topics
 from eng_universe.ingest.etl import ParsedDocument
+from eng_universe.monitoring.logging_utils import get_event_logger
 from eng_universe.monitoring.metrics import record_index
 from eng_universe.search.pylate_backend import add_documents as pylate_add_documents
 
-LOGGER = logging.getLogger("indexer")
-if not logging.getLogger().handlers:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s | %(message)s", datefmt="%H:%M:%S"
-    )
-
-
-def log_event(event: str, **fields: object) -> None:
-    if not Settings.crawl_log:
-        return
-    parts = " ".join(f"{key}={value}" for key, value in fields.items())
-    LOGGER.info("%-8s %s", event.upper(), parts)
+log_event = get_event_logger("indexer")
 
 
 @dataclass

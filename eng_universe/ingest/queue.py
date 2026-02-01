@@ -1,9 +1,12 @@
 import time
 from dataclasses import dataclass
 
+from eng_universe.monitoring.logging_utils import get_event_logger
 import redis.asyncio as redis
 
 from eng_universe.config import Settings
+
+log_event = get_event_logger("queue")
 
 
 @dataclass
@@ -35,10 +38,13 @@ def _deserialize(raw: bytes) -> CrawlItem | None:
 async def enqueue(
     redis_client: redis.Redis, item: CrawlItem, *, dedupe: bool = True
 ) -> None:
+    log_event("enqueue", item=item)
     if dedupe:
+        # Try adding url to redis set
         added = await redis_client.sadd(Settings.crawl_seen_key, item.url)
         if not added:
             return
+    # Append url to queue
     await redis_client.rpush(Settings.crawl_queue_key, _serialize(item))
 
 

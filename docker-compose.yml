@@ -22,7 +22,7 @@ services:
     command: ["python", "main.py", "crawl"]
     environment:
       REDIS_URL: redis://default:devpass@redis:6379/0
-      CRAWLER_CONCURRENCY: "200"
+      MAX_WORKERS: "200"
       SEED_START_URLS: "https://engineering.fb.com/"
     depends_on:
       - redis

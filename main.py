@@ -28,7 +28,7 @@ def main() -> None:
         "--concurrency",
         type=int,
         default=None,
-        help="Number of crawler workers to run (default: CRAWLER_CONCURRENCY)",
+        help="Number of crawler workers to run (default: MAX_WORKERS)",
     )
     sub.add_parser("index", help="Run indexer workers")
     sub.add_parser("init-index", help="Initialize search index")
@@ -46,7 +46,7 @@ def main() -> None:
         return
     if args.command == "crawl":
         if args.concurrency is not None:
-            Settings.max_concurrency = max(1, args.concurrency)
+            Settings.max_workers = max(1, args.concurrency)
         asyncio.run(run_crawlers(max_docs=args.max_docs))
         return
     if args.command == "index":

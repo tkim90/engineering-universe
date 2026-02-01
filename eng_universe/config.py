@@ -69,7 +69,9 @@ class Settings:
         "SEED_START_URLS",
         "https://engineering.fb.com/",
     )
-    max_concurrency = int(os.getenv("CRAWLER_CONCURRENCY", 200))
+    max_workers = int(
+        os.getenv("MAX_WORKERS") or os.getenv("CRAWLER_CONCURRENCY", "200")
+    )
     request_timeout_s = int(os.getenv("REQUEST_TIMEOUT_S", 20))
     crawl_delay_default_s = int(os.getenv("CRAWL_DELAY_DEFAULT_S", 5))
     embeddings_provider = os.getenv("EMBEDDINGS_PROVIDER", "dummy")

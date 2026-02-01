@@ -38,7 +38,7 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
-    Settings.max_concurrency = max(1, args.concurrency)
+    Settings.max_workers = max(1, args.concurrency)
     redis_client = redis.from_url(Settings.redis_url)
     prefix = Settings.crawl_doc_key_prefix
     stop_event = asyncio.Event()
@@ -62,7 +62,7 @@ async def main() -> None:
                     counter_lock=counter_lock,
                 )
             )
-            for _ in range(Settings.max_concurrency)
+            for _ in range(Settings.max_workers)
         ]
         last_active = time.time()
         while True:

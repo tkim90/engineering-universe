@@ -437,7 +437,7 @@ async def run_crawlers(
                     counter_lock=counter_lock,
                 )
             )
-            for _ in range(Settings.max_concurrency)
+            for _ in range(Settings.max_workers)
         ]
         await asyncio.gather(*workers)
 

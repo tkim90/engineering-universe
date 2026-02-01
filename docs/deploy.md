@@ -9,7 +9,7 @@
 ## Workers
 
 - Run crawler and indexer as containerized workers.
-- Scale crawler concurrency via `CRAWLER_CONCURRENCY`.
+- Scale crawler concurrency via `MAX_WORKERS`.
 - Use a process manager (systemd, supervisor, or Kubernetes).
 
 ## Redis

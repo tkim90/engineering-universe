@@ -1,7 +1,7 @@
 1. Seed and start
 
 - python main.py seed → seed_queue() enqueues CrawlItem(url, depth=0) in crawl:queue.
-- python main.py crawl → run_crawlers() starts CRAWLER_CONCURRENCY workers and a shared aiohttp session.
+- python main.py crawl → run_crawlers() starts MAX_WORKERS workers and a shared aiohttp session.
 
 2. Worker loop (per item)
 

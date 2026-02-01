@@ -63,11 +63,11 @@ class Settings:
     crawl_log = env_bool("CRAWL_LOG", "true")
     seed_domains = os.getenv(
         "SEED_DOMAINS",
-        "engineering.fb.com,builders.ramp.com,www.anthropic.com,developers.openai.com",
+        "engineering.fb.com",
     )
     seed_start_urls = os.getenv(
         "SEED_START_URLS",
-        "https://engineering.fb.com/,https://builders.ramp.com/,https://www.anthropic.com/engineering,https://developers.openai.com/blog/",
+        "https://engineering.fb.com/",
     )
     max_concurrency = int(os.getenv("CRAWLER_CONCURRENCY", 200))
     request_timeout_s = int(os.getenv("REQUEST_TIMEOUT_S", 20))
@@ -97,3 +97,10 @@ class Settings:
     indexer_idle_grace_s = float(os.getenv("INDEXER_IDLE_GRACE_S", "2"))
     metrics_port = int(os.getenv("METRICS_PORT", 9100))
     api_port = int(os.getenv("API_PORT", 8080))
+    r2_upload = env_bool("R2_UPLOAD", "false")
+    r2_account_id = os.getenv("R2_ACCOUNT_ID", "")
+    r2_access_key_id = os.getenv("R2_ACCESS_KEY_ID", "")
+    r2_secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY", "")
+    r2_bucket_name = os.getenv("R2_BUCKET_NAME", "")
+    r2_region = os.getenv("R2_REGION", "auto")
+    r2_endpoint_url = os.getenv("R2_ENDPOINT_URL", "")

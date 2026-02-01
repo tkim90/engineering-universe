@@ -1,6 +1,5 @@
 import argparse
 import asyncio
-from pathlib import Path
 import sys
 import time
 
@@ -42,7 +41,6 @@ async def main() -> None:
     Settings.max_concurrency = max(1, args.concurrency)
     redis_client = redis.from_url(Settings.redis_url)
     prefix = Settings.crawl_doc_key_prefix
-    storage_dir = Path(Settings.crawl_storage_dir)
     stop_event = asyncio.Event()
 
     max_docs = args.max_docs if args.max_docs > 0 else None
@@ -58,7 +56,6 @@ async def main() -> None:
                     redis_client,
                     session,
                     prefix,
-                    storage_dir,
                     stop_event=stop_event,
                     max_docs=max_docs,
                     counter=counter,

@@ -1,7 +1,6 @@
 import asyncio
 from dataclasses import dataclass
 import hashlib
-from pathlib import Path
 import re
 import time
 from urllib.parse import urldefrag, urljoin, urlparse
@@ -14,12 +13,19 @@ import redis.asyncio as redis
 from eng_universe.config import Settings
 from eng_universe.monitoring.logging_utils import get_event_logger
 from eng_universe.monitoring.metrics import record_crawl
-from eng_universe.ingest.queue import CrawlItem, delay, dequeue, enqueue, promote_due
+from eng_universe.ingest.queue import (
+    CrawlItem,
+    delay,
+    dequeue,
+    enqueue,
+    requeue_delayed_items,
+)
 from eng_universe.ingest.robots import (
     get_or_fetch_robots,
     parse_domain,
     reserve_next_allowed,
 )
+import eng_universe.storage.r2 as r2
 from urllib.robotparser import RobotFileParser
 
 
@@ -120,7 +126,7 @@ def normalize_url(url: str) -> str | None:
     return normalized.geturl()
 
 
-def extract_links(soup: BeautifulSoup, base_url: str) -> set[str]:
+def extract_links_from_soup(soup: BeautifulSoup, base_url: str) -> set[str]:
     links: set[str] = set()
     for tag in soup.find_all("a", href=True):
         href = tag.get("href")
@@ -205,32 +211,143 @@ def url_hash(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()
 
 
-def storage_paths(base_dir: Path, doc_id: int, url: str) -> tuple[Path, Path]:
-    digest = url_hash(url)
-    raw_path = base_dir / str(doc_id) / f"raw_{digest}.html"
-    cleaned_path = base_dir / str(doc_id) / f"clean_{digest}.html"
-    return raw_path, cleaned_path
-
-
-def write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-
-
-async def fetch_html(session: aiohttp.ClientSession, url: str) -> CrawlResult | None:
+async def fetch_html(
+    session: aiohttp.ClientSession, url: str
+) -> tuple[CrawlResult | None, Exception | None]:
     try:
         async with session.get(url, timeout=Settings.request_timeout_s) as response:
             html = await response.text()
-            return CrawlResult(url=url, status=response.status, html=html)
-    except (aiohttp.ClientError, asyncio.TimeoutError):
+            return CrawlResult(url=url, status=response.status, html=html), None
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        return None, exc
+
+
+async def check_robots_txt(
+    redis_client: redis.Redis,
+    session: aiohttp.ClientSession,
+    item: CrawlItem,
+) -> str | None:
+    domain = parse_domain(item.url)
+    rules = await get_or_fetch_robots(redis_client, session, domain)
+    parser = RobotFileParser()
+    parser.parse(rules.text.splitlines())
+    if not parser.can_fetch(Settings.user_agent, item.url):
+        log_event("deny", url=item.url, reason="robots")
         return None
+    min_delay_s = max(rules.crawl_delay_s, rules.request_rate_s)
+    allowed, next_allowed = await reserve_next_allowed(
+        redis_client, domain, min_delay_s
+    )
+    if not allowed:
+        await delay(redis_client, item, next_allowed)
+        log_event("delay", url=item.url, until=next_allowed)
+        return None
+    return domain
+
+
+async def parse_sitemap(
+    redis_client: redis.Redis, item: CrawlItem, result: CrawlResult
+) -> None:
+    sitemap_links = parse_sitemap_links(result.html)
+    for link in sitemap_links:
+        normalized = normalize_url(link)
+        if not normalized or not is_allowed_url(normalized):
+            continue
+        await enqueue(
+            redis_client,
+            CrawlItem(url=normalized, source="sitemap", depth=item.depth + 1),
+        )
+    log_event("sitemap", url=item.url, links=len(sitemap_links))
+
+
+async def extract_links(
+    redis_client: redis.Redis,
+    item: CrawlItem,
+    result: CrawlResult,
+    domain: str,
+) -> None:
+    soup = BeautifulSoup(result.html, "html.parser")
+    links = extract_links_from_soup(soup, result.url)
+    if not Settings.crawl_allow_external:
+        links = {link for link in links if parse_domain(link) == domain}
+    links = {link for link in links if is_allowed_url(link)}
+    if item.depth < Settings.crawl_depth_limit:
+        next_depth = item.depth + 1
+        for link in links:
+            if link == item.url:
+                continue
+            await enqueue(
+                redis_client,
+                CrawlItem(url=link, source=item.source, depth=next_depth),
+            )
+
+
+async def upload_r2(
+    redis_client: redis.Redis,
+    doc_key_prefix: str,
+    item: CrawlItem,
+    result: CrawlResult,
+    domain: str,
+) -> bool:
+    should_store = (
+        not (item.source == "seed" and item.depth == 0)
+        and item.source != "sitemap"
+        and not is_listing_url(item.url)
+    )
+    if not should_store:
+        if item.source == "seed" and item.depth == 0:
+            reason = "seed"
+        elif is_listing_url(item.url):
+            reason = "listing"
+        else:
+            reason = item.source
+        log_event("skip", url=item.url, reason=reason)
+        return False
+    if not r2.r2_enabled():
+        log_event("skip", url=item.url, reason="r2_disabled")
+        return False
+
+    doc_id = int(await redis_client.incr(Settings.crawl_doc_seq_key))
+    raw_key = f"raw/{doc_id}.html"
+    clean_key = f"clean/{doc_id}.txt"
+    try:
+        await asyncio.to_thread(
+            r2.upload_html,
+            result.html,
+            raw_key,
+        )
+    except Exception as exc:
+        log_event("r2_fail", url=item.url, error=type(exc).__name__)
+        return False
+
+    await redis_client.hset(
+        f"{doc_key_prefix}{doc_id}",
+        mapping={
+            "url": item.url,
+            "domain": domain,
+            "source": item.source,
+            "depth": item.depth,
+            "raw_key": raw_key,
+            "clean_key": clean_key,
+            "url_hash": url_hash(item.url),
+            "fetched_at": int(time.time()),
+            "status": result.status,
+        },
+    )
+    await redis_client.rpush(Settings.raw_queue_key, doc_id)
+    log_event(
+        "stored",
+        id=doc_id,
+        url=item.url,
+        raw=raw_key,
+    )
+    return True
 
 
 async def crawl_worker(
     redis_client: redis.Redis,
     session: aiohttp.ClientSession,
     doc_key_prefix: str,
-    storage_dir: Path,
     stop_event: asyncio.Event | None = None,
     max_docs: int | None = None,
     counter: list[int] | None = None,
@@ -239,7 +356,7 @@ async def crawl_worker(
     while True:
         if stop_event and stop_event.is_set():
             return
-        await promote_due(redis_client)
+        await requeue_delayed_items(redis_client)
         item = await dequeue(redis_client)
         if item is None:
             await asyncio.sleep(0.2)
@@ -250,98 +367,38 @@ async def crawl_worker(
             depth=item.depth,
             source=item.source,
         )
-        domain = parse_domain(item.url)
-        rules = await get_or_fetch_robots(redis_client, session, domain)
-        parser = RobotFileParser()
-        parser.parse(rules.text.splitlines())
-        if not parser.can_fetch(Settings.user_agent, item.url):
-            log_event("deny", url=item.url, reason="robots")
+
+        # Check robots.txt for rate limit
+        domain = await check_robots_txt(redis_client, session, item)
+        if domain is None:
             continue
-        min_delay_s = max(rules.crawl_delay_s, rules.request_rate_s)
-        allowed, next_allowed = await reserve_next_allowed(
-            redis_client, domain, min_delay_s
-        )
-        if not allowed:
-            await delay(redis_client, item, next_allowed)
-            log_event("delay", url=item.url, until=next_allowed)
-            continue
-        result = await fetch_html(session, item.url)
+
+        # Fetch url
+        result, fetch_error = await fetch_html(session, item.url)
         if result is None or result.status >= 400:
-            log_event(
-                "fail",
-                url=item.url,
-                status=result.status if result else "error",
-            )
+            log_payload = {
+                "url": item.url,
+                "status": result.status if result else "error",
+            }
+            if fetch_error is not None:
+                log_payload["error"] = str(fetch_error)
+                log_payload["error_type"] = type(fetch_error).__name__
+            log_event("fail", **log_payload)
             continue
+
+        # Parse sitemap
         if is_sitemap_url(result.url):
-            sitemap_links = parse_sitemap_links(result.html)
-            for link in sitemap_links:
-                normalized = normalize_url(link)
-                if not normalized or not is_allowed_url(normalized):
-                    continue
-                await enqueue(
-                    redis_client,
-                    CrawlItem(url=normalized, source="sitemap", depth=item.depth + 1),
-                )
-            log_event("sitemap", url=item.url, links=len(sitemap_links))
+            await parse_sitemap(redis_client, item, result)
             continue
-        soup = BeautifulSoup(result.html, "html.parser")
-        links = extract_links(soup, result.url)
-        if not Settings.crawl_allow_external:
-            links = {link for link in links if parse_domain(link) == domain}
-        links = {link for link in links if is_allowed_url(link)}
-        if item.depth < Settings.crawl_depth_limit:
-            next_depth = item.depth + 1
-            for link in links:
-                if link == item.url:
-                    continue
-                await enqueue(
-                    redis_client,
-                    CrawlItem(url=link, source=item.source, depth=next_depth),
-                )
-        stored = False
-        if (
-            not (item.source == "seed" and item.depth == 0)
-            and item.source != "sitemap"
-            and not is_listing_url(item.url)
-        ):
-            cleaned_html = str(_clean_container(soup))
-            doc_id = int(await redis_client.incr(Settings.crawl_doc_seq_key))
-            raw_path, cleaned_path = storage_paths(storage_dir, doc_id, item.url)
-            await asyncio.to_thread(write_text, raw_path, result.html)
-            await asyncio.to_thread(write_text, cleaned_path, cleaned_html)
-            await redis_client.hset(
-                f"{doc_key_prefix}{doc_id}",
-                mapping={
-                    "url": item.url,
-                    "domain": domain,
-                    "source": item.source,
-                    "depth": item.depth,
-                    "raw_path": str(raw_path),
-                    "cleaned_path": str(cleaned_path),
-                    "url_hash": url_hash(item.url),
-                    "fetched_at": int(time.time()),
-                    "status": result.status,
-                },
-            )
-            await redis_client.rpush(Settings.raw_queue_key, doc_id)
-            stored = True
-            log_event(
-                "stored",
-                id=doc_id,
-                url=item.url,
-                raw=str(raw_path),
-                cleaned=str(cleaned_path),
-            )
-        else:
-            if item.source == "seed" and item.depth == 0:
-                reason = "seed"
-            elif is_listing_url(item.url):
-                reason = "listing"
-            else:
-                reason = item.source
-            log_event("skip", url=item.url, reason=reason)
+
+        # Extract links from url n levels deep
+        await extract_links(redis_client, item, result, domain)
+
+        # Store raw html to r2
+        stored = await upload_r2(redis_client, doc_key_prefix, item, result, domain)
         record_crawl(domain)
+
+        # Check if max crawl limit reached
         if (
             stored
             and max_docs is not None
@@ -360,7 +417,6 @@ async def run_crawlers(
 ) -> None:
     redis_client = redis.from_url(Settings.redis_url)
     prefix = doc_key_prefix or Settings.crawl_doc_key_prefix
-    storage_dir = Path(Settings.crawl_storage_dir)
     if max_docs is not None and max_docs <= 0:
         return
     stop_event = asyncio.Event() if max_docs is not None else None
@@ -375,7 +431,6 @@ async def run_crawlers(
                     redis_client,
                     session,
                     prefix,
-                    storage_dir,
                     stop_event=stop_event,
                     max_docs=max_docs,
                     counter=counter,

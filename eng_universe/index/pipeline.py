@@ -7,7 +7,9 @@ import redis.asyncio as redis
 
 from eng_universe.config import Settings
 from eng_universe.ingest.etl import parse_html
+from eng_universe.index.entities import extract_topics
 from eng_universe.index.indexer import index_document, log_event
+from eng_universe.storage.r2 import download_text, r2_enabled, upload_json, upload_text
 
 
 def _read_text(path: str) -> str:
@@ -17,6 +19,25 @@ def _read_text(path: str) -> str:
     if not file_path.exists():
         return ""
     return file_path.read_text(encoding="utf-8")
+
+
+def _decode_bytes(value: object | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode()
+    return str(value)
+
+
+def _decode_int(value: object | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode()
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 async def index_worker(doc_key_prefix: str | None = None) -> None:
@@ -52,11 +73,29 @@ async def index_worker(doc_key_prefix: str | None = None) -> None:
         if not crawl_meta:
             log_event("skip", doc_id=raw_doc_id, reason="missing_meta")
             continue
-        url = crawl_meta.get(b"url", b"").decode()
-        source = crawl_meta.get(b"source", b"").decode()
-        raw_path = crawl_meta.get(b"raw_path", b"").decode()
-        cleaned_path = crawl_meta.get(b"cleaned_path", b"").decode()
-        raw_html = _read_text(raw_path)
+        url = _decode_bytes(crawl_meta.get(b"url"))
+        source = _decode_bytes(crawl_meta.get(b"source"))
+        raw_path = _decode_bytes(crawl_meta.get(b"raw_path"))
+        cleaned_path = _decode_bytes(crawl_meta.get(b"cleaned_path"))
+        raw_key = _decode_bytes(crawl_meta.get(b"raw_key"))
+        clean_key = _decode_bytes(crawl_meta.get(b"clean_key"))
+        if not raw_key:
+            raw_key = f"raw/{raw_doc_id}.html"
+        if not clean_key:
+            clean_key = f"clean/{raw_doc_id}.txt"
+        domain = _decode_bytes(crawl_meta.get(b"domain"))
+        depth = _decode_int(crawl_meta.get(b"depth"))
+        fetched_at = _decode_int(crawl_meta.get(b"fetched_at"))
+        status = _decode_int(crawl_meta.get(b"status"))
+        raw_html = ""
+        if r2_enabled():
+            try:
+                raw_html = await asyncio.to_thread(download_text, raw_key)
+            except Exception as exc:
+                log_event("r2_fail", doc_id=raw_doc_id, error=type(exc).__name__)
+                raw_html = ""
+        if not raw_html:
+            raw_html = _read_text(raw_path)
         cleaned_html = _read_text(cleaned_path)
         if not url or not (raw_html or cleaned_html):
             log_event("skip", doc_id=raw_doc_id, url=url, reason="missing_html")
@@ -66,4 +105,37 @@ async def index_worker(doc_key_prefix: str | None = None) -> None:
         if cleaned_html:
             cleaned_parsed = parse_html(url, cleaned_html)
             parsed = replace(parsed, content=cleaned_parsed.content)
+        if r2_enabled():
+            index_payload = {
+                "doc_id": int(raw_doc_id) if raw_doc_id.isdigit() else raw_doc_id,
+                "url": parsed.url,
+                "canonical_url": parsed.canonical_url,
+                "title": parsed.title,
+                "content": parsed.content,
+                "authors": parsed.authors,
+                "company": parsed.company,
+                "published_at": parsed.published_at,
+                "language": parsed.language,
+                "source": source,
+                "domain": domain,
+                "depth": depth,
+                "fetched_at": fetched_at,
+                "status": status,
+                "topics": extract_topics(parsed.content),
+                "raw_key": raw_key,
+                "clean_key": clean_key,
+            }
+            try:
+                await asyncio.to_thread(
+                    upload_text,
+                    parsed.content,
+                    clean_key,
+                )
+                await asyncio.to_thread(
+                    upload_json,
+                    index_payload,
+                    f"index/{raw_doc_id}.json",
+                )
+            except Exception as exc:
+                log_event("r2_fail", doc_id=raw_doc_id, error=type(exc).__name__)
         await index_document(redis_client, parsed, source=source)

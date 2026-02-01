@@ -9,17 +9,20 @@ search uses a local PLAID index on disk instead of RediSearch.
 - `crawl:delay` sorted set for delayed URLs (score = next_allowed_ts).
 - `crawl:seen` set of normalized URLs that were enqueued.
 - `crawl:doc_seq` integer sequence for crawl doc IDs.
-- `crawl:doc:{doc_id}` hash of crawl metadata (url, domain, paths, depth, status).
+- `crawl:doc:{doc_id}` hash of crawl metadata (url, domain, depth, status, raw_key, clean_key).
 - `raw:queue` list of crawl document IDs ready for indexing.
 - `doc:{doc_id}` hash of indexed document fields.
 - `robots:{domain}` hash of robots rules.
 - `robots:next_allowed:{domain}` string unix timestamp.
 
-## Disk Storage
+## Object Storage (R2)
 
-- Raw and cleaned HTML are stored under `CRAWL_STORAGE_DIR` using:
-  - `{doc_id}/raw_{url_hash}.html`
-  - `{doc_id}/clean_{url_hash}.html`
+When `R2_UPLOAD=true`, crawler raw HTML and indexer clean text/index payloads are
+stored in R2 using:
+
+- `raw/{doc_id}.html`
+- `clean/{doc_id}.txt`
+- `index/{doc_id}.json`
 
 ## RediSearch Index
 

@@ -12,7 +12,13 @@ from eng_universe.ingest.crawler import (
     seed_queue,
 )
 from eng_universe.ingest.etl import ParsedDocument, parse_html
-from eng_universe.ingest.queue import CrawlItem, delay, dequeue, enqueue, promote_due
+from eng_universe.ingest.queue import (
+    CrawlItem,
+    delay,
+    dequeue,
+    enqueue,
+    requeue_delayed_items,
+)
 from eng_universe.ingest.robots import (
     RobotsRules,
     get_or_fetch_robots,
@@ -39,7 +45,7 @@ __all__ = [
     "delay",
     "dequeue",
     "enqueue",
-    "promote_due",
+    "requeue_delayed_items",
     # robots
     "RobotsRules",
     "get_or_fetch_robots",

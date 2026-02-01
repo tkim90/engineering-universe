@@ -13,8 +13,9 @@ Combines keyword (BM25) and semantic search for hybrid results.
 ## Quickstart
 
 1. Set `REDIS_URL` and optional embedding provider env vars
-2. `python main.py seed && python main.py crawl` (optional: `--max-docs N --concurrency K`)
-3. `python main.py index`
+2. If you want R2 storage, set `R2_UPLOAD=true` plus `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME` (optional: `R2_REGION`, `R2_ENDPOINT_URL`)
+3. `python main.py seed && python main.py crawl` (optional: `--max-docs N --concurrency K`)
+4. `python main.py index` (uploads clean text + index JSON to R2; reads raw HTML from R2)
 4. `uvicorn api.search:app --reload`
 
 ## Docker

@@ -21,6 +21,7 @@ def _serialize(item: CrawlItem) -> str:
 
 
 def _deserialize(raw: bytes) -> CrawlItem | None:
+    """Deserializes redis item from bytes to CrawlItem"""
     parts = raw.decode().split("\t")
     if len(parts) < 2:
         return None
@@ -62,8 +63,15 @@ async def delay(redis_client: redis.Redis, item: CrawlItem, when_ts: int) -> Non
     )
 
 
-async def promote_due(redis_client: redis.Redis, max_items: int = 100) -> int:
+async def requeue_delayed_items(redis_client: redis.Redis, max_items: int = 100) -> int:
+    """
+    Moves items from the delay queue back to main crawl queue when their
+    scheduled time arrives. It queries for items with timestamps up to current time,
+    removes them from delay queue, and pushes them back to the main queue for processing.
+    """
     now = time.time()
+
+    # Fetch earliest items until now
     items = await redis_client.zrangebyscore(
         Settings.crawl_delay_key, "-inf", now, start=0, num=max_items
     )

@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 from eng_universe.config import Settings
 from eng_universe.ingest.etl import parse_html
 from eng_universe.index.indexer import index_document
+from eng_universe.storage.r2 import download_text, r2_enabled
 
 
 def read_text(path: str) -> str:
@@ -39,8 +40,16 @@ async def main() -> None:
     source = crawl_meta.get(b"source", b"").decode()
     raw_path = crawl_meta.get(b"raw_path", b"").decode()
     cleaned_path = crawl_meta.get(b"cleaned_path", b"").decode()
+    raw_key = crawl_meta.get(b"raw_key", b"").decode() or f"raw/{args.doc_id}.html"
 
-    raw_html = read_text(raw_path)
+    raw_html = ""
+    if r2_enabled():
+        try:
+            raw_html = await asyncio.to_thread(download_text, raw_key)
+        except Exception:
+            raw_html = ""
+    if not raw_html:
+        raw_html = read_text(raw_path)
     cleaned_html = read_text(cleaned_path)
     if not url or not (raw_html or cleaned_html):
         print("Missing url or HTML content to index.")

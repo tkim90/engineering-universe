@@ -24,7 +24,8 @@
       "Bash(source .venv/bin/activate)",
       "Bash(python:*)",
       "Bash(uv run python:*)",
-      "Bash(ln:*)"
+      "Bash(ln:*)",
+      "Bash(grep:*)"
     ]
   }
 }

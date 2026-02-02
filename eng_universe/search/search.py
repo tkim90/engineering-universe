@@ -52,22 +52,62 @@ def _make_snippet(content: str, query: str, max_len: int = 200) -> str:
     return snippet
 
 
-_REDIS_SPECIAL_CHARS = re.compile(r'([\\@{}\[\]\(\)\|<>\"\'=:;!#$%^&*+\-=~,\.])')
+_REDIS_SPECIAL_CHARS = re.compile(r"([\\@{}\[\]\(\)\|<>\"\'=:;!#$%^&*+\-=~,\.])")
 
 
 def _escape_redis_query(text: str) -> str:
     return _REDIS_SPECIAL_CHARS.sub(r"\\\1", text)
 
 
+_PREFIX_WORD = re.compile(r"\w+$")
+_PREFIX_TWO = re.compile(r"\w{2}$")
+_PREFIX_ONE = re.compile(r"\w$")
+
+
+def _split_prefix_query(text: str) -> tuple[str, str | None]:
+    """
+    Normalizes special characters (hyphens, spaces, quotes, etc).
+    If normalized text has 1 or 2+ chars at the end, splits off as separate word:
+      Example: "machine lear" -> ("machine", "lear")
+      Example: "python p" -> ("python", "p")
+    """
+    normalized = text.replace("-", " ")
+    normalized = re.sub(
+        r"[\u2013\u2014\u2026\u00ab\u00bb\u2018\u2019]", " ", normalized
+    )
+    normalized = re.sub(r"[\u201c\u201d]", '"', normalized)
+    normalized = normalized.strip()
+    if not normalized:
+        return "", None
+    if _PREFIX_TWO.search(normalized):
+        match = _PREFIX_WORD.search(normalized)
+        if match:
+            return normalized[: match.start()], normalized[match.start() :]
+    if _PREFIX_ONE.search(normalized):
+        return normalized[:-1], None
+    return normalized, None
+
+
 def _build_text_query(query: str) -> str:
-    cleaned = query.strip()
-    if not cleaned:
+    """
+    Returns redis full text query from user input.
+    """
+    base, prefix = _split_prefix_query(query)
+    if not base and not prefix:
         return "*"
-    fields = [field.name for field in Settings.keyword_fields if field.field_type == "TEXT"]
+    fields = [
+        field.name for field in Settings.keyword_fields if field.field_type == "TEXT"
+    ]
     if not fields:
         fields = ["title", "content"]
     field_expr = "|".join(fields)
-    return f"@{field_expr}:({_escape_redis_query(cleaned)})"
+    if prefix:
+        base_expr = _escape_redis_query(base)
+        prefix_expr = _escape_redis_query(prefix)
+        query_expr = f"{base_expr}({prefix_expr}|{prefix_expr}*)"
+    else:
+        query_expr = _escape_redis_query(base)
+    return f"@{field_expr}:({query_expr})"
 
 
 def _decode_value(value: object) -> str:
@@ -88,6 +128,66 @@ def _decode_hash(
         else:
             decoded[name] = _decode_value(value)
     return decoded
+
+
+def _decode_doc_ids(raw: object) -> list[str]:
+    """Extract docIDs from Redis response"""
+    if not raw:
+        return []
+    if not isinstance(raw, (list, tuple)) or len(raw) <= 1:
+        return []
+    return [_decode_value(item) for item in raw[1:]]
+
+
+def _result_from_mapping(
+    mapping: dict[str, object],
+    *,
+    doc_key: str,
+    query: str,
+    score: float,
+) -> SearchResult:
+    authors_raw = mapping.get("authors", "")
+    authors = [item.strip() for item in str(authors_raw).split(",") if item.strip()]
+    content = str(mapping.get("content", ""))
+    return SearchResult(
+        doc_id=str(mapping.get("doc_id") or doc_key),
+        title=str(mapping.get("title", "")),
+        url=str(mapping.get("url", "")),
+        snippet=_make_snippet(content, query),
+        authors=authors,
+        company=str(mapping.get("company", "")),
+        published_at=str(mapping.get("published_at") or "") or None,
+        score=score,
+    )
+
+
+async def load_doc_cache(
+    redis_client: redis.Redis, *, batch_size: int = 500
+) -> dict[str, dict[str, object]]:
+    cache: dict[str, dict[str, object]] = {}
+    batch: list[str] = []
+    async for key in redis_client.scan_iter(match="doc:*", count=batch_size):
+        key_str = _decode_value(key)
+        batch.append(key_str)
+        if len(batch) >= batch_size:
+            await _load_doc_cache_batch(redis_client, cache, batch)
+            batch = []
+    if batch:
+        await _load_doc_cache_batch(redis_client, cache, batch)
+    return cache
+
+
+async def _load_doc_cache_batch(
+    redis_client: redis.Redis, cache: dict[str, dict[str, object]], keys: list[str]
+) -> None:
+    pipe = redis_client.pipeline()
+    for key in keys:
+        pipe.hgetall(key)
+    raw_docs = await pipe.execute()
+    for key, raw_doc in zip(keys, raw_docs):
+        if not raw_doc:
+            continue
+        cache[key] = _decode_hash(raw_doc, keep_bytes={"embedding"})
 
 
 def _bytes_to_vector(raw: object) -> list[float]:
@@ -117,11 +217,12 @@ async def search(
     query: str,
     mode: str = "hybrid",
     limit: int = 10,
-) -> list[SearchResult]:
-    start = time.time()
+    doc_cache: dict[str, dict[str, object]] | None = None,
+) -> tuple[list[SearchResult], float]:
+    query_latency_ms = 0.0
     query = query.strip()
     if not query:
-        return []
+        return [], query_latency_ms
     if Settings.keyword_only and mode != "keyword":
         mode = "keyword"
     provider_name = Settings.embeddings_provider.lower()
@@ -134,12 +235,16 @@ async def search(
             limit,
         )
     if provider_name in {"pylate", "colbert"} and mode != "keyword":
-        results = await _search_pylate(redis_client, query, limit)
+        results, query_latency_ms = await _search_pylate(
+            redis_client, query, limit, doc_cache=doc_cache
+        )
         if Settings.debug_search:
             LOGGER.info("search pylate results=%s", len(results))
-        SEARCH_LATENCY_MS.observe((time.time() - start) * 1000)
-        return results
+        SEARCH_LATENCY_MS.observe(query_latency_ms)
+        return results, query_latency_ms
     text_query = _build_text_query(query)
+    needs_vector_score = False
+    embedding: list[float] | None = None
     if mode == "keyword":
         args = [
             "FT.SEARCH",
@@ -149,13 +254,7 @@ async def search(
             "0",
             str(limit),
             "RETURN",
-            "6",
-            "title",
-            "url",
-            "content",
-            "authors",
-            "company",
-            "published_at",
+            "0",
             "DIALECT",
             "2",
         ]
@@ -167,12 +266,11 @@ async def search(
         provider = get_embedding_provider()
         embedding = provider.embed(query).vector
         embedding = normalize_embedding(embedding, Settings.embeddings_dim)
-        vector_bytes = struct.pack(
-            f"{Settings.embeddings_dim}f", *embedding
-        )
+        vector_bytes = struct.pack(f"{Settings.embeddings_dim}f", *embedding)
         if mode == "hybrid":
             bm25_limit = max(limit * 5, limit)
             vector_limit = max(limit * 5, limit)
+            start_query = time.perf_counter()
             bm25_raw = await redis_client.execute_command(
                 "FT.SEARCH",
                 index_name,
@@ -182,10 +280,11 @@ async def search(
                 str(bm25_limit),
                 "RETURN",
                 "0",
-                "WITHSCORES",
                 "DIALECT",
                 "2",
             )
+            query_latency_ms += (time.perf_counter() - start_query) * 1000
+            start_query = time.perf_counter()
             vector_raw = await redis_client.execute_command(
                 "FT.SEARCH",
                 index_name,
@@ -201,20 +300,9 @@ async def search(
                 "DIALECT",
                 "2",
             )
-            bm25_scores: dict[str, float] = {}
-            bm25_ids: list[str] = []
-            if bm25_raw and len(bm25_raw) > 1:
-                i = 1
-                while i < len(bm25_raw):
-                    doc_key = _decode_value(bm25_raw[i])
-                    score = float(bm25_raw[i + 1])
-                    bm25_scores[doc_key] = score
-                    bm25_ids.append(doc_key)
-                    i += 2
-            vector_ids: list[str] = []
-            if vector_raw and len(vector_raw) > 1:
-                for i in range(1, len(vector_raw)):
-                    vector_ids.append(_decode_value(vector_raw[i]))
+            query_latency_ms += (time.perf_counter() - start_query) * 1000
+            bm25_ids = _decode_doc_ids(bm25_raw)
+            vector_ids = _decode_doc_ids(vector_raw)
             doc_keys = list(dict.fromkeys(bm25_ids + vector_ids))
             if Settings.debug_search:
                 LOGGER.info(
@@ -224,16 +312,27 @@ async def search(
                     len(doc_keys),
                 )
             if not doc_keys:
-                return []
-            pipe = redis_client.pipeline()
-            for doc_key in doc_keys:
-                pipe.hgetall(doc_key)
-            raw_docs = await pipe.execute()
+                SEARCH_LATENCY_MS.observe(query_latency_ms)
+                return [], query_latency_ms
             results: list[SearchResult] = []
-            for doc_key, raw_doc in zip(doc_keys, raw_docs):
-                if not raw_doc:
-                    continue
-                mapping = _decode_hash(raw_doc, keep_bytes={"embedding"})
+            doc_items: list[tuple[str, dict[str, object]]] = []
+            if doc_cache is None:
+                pipe = redis_client.pipeline()
+                for doc_key in doc_keys:
+                    pipe.hgetall(doc_key)
+                raw_docs = await pipe.execute()
+                for doc_key, raw_doc in zip(doc_keys, raw_docs):
+                    if not raw_doc:
+                        continue
+                    mapping = _decode_hash(raw_doc, keep_bytes={"embedding"})
+                    doc_items.append((doc_key, mapping))
+            else:
+                for doc_key in doc_keys:
+                    mapping = doc_cache.get(doc_key)
+                    if not mapping:
+                        continue
+                    doc_items.append((doc_key, mapping))
+            for doc_key, mapping in doc_items:
                 embedding_raw = mapping.get("embedding")
                 doc_vector = _bytes_to_vector(embedding_raw)
                 try:
@@ -243,28 +342,17 @@ async def search(
                 except ValueError:
                     continue
                 score = _cosine_similarity(embedding, doc_vector)
-                authors_raw = mapping.get("authors", "")
-                authors = [
-                    item.strip()
-                    for item in str(authors_raw).split(",")
-                    if item.strip()
-                ]
-                content = str(mapping.get("content", ""))
                 results.append(
-                    SearchResult(
-                        doc_id=str(mapping.get("doc_id") or doc_key),
-                        title=str(mapping.get("title", "")),
-                        url=str(mapping.get("url", "")),
-                        snippet=_make_snippet(content, query),
-                        authors=authors,
-                        company=str(mapping.get("company", "")),
-                        published_at=str(mapping.get("published_at") or "") or None,
+                    _result_from_mapping(
+                        mapping,
+                        doc_key=doc_key,
+                        query=query,
                         score=score,
                     )
                 )
             results.sort(key=lambda item: item.score, reverse=True)
-            SEARCH_LATENCY_MS.observe((time.time() - start) * 1000)
-            return results[:limit]
+            SEARCH_LATENCY_MS.observe(query_latency_ms)
+            return results[:limit], query_latency_ms
         if mode == "semantic":
             text_query = "*"
         if text_query == "*":
@@ -286,18 +374,14 @@ async def search(
             "SORTBY",
             "vector_score",
             "RETURN",
-            "7",
-            "title",
-            "url",
-            "content",
-            "authors",
-            "company",
-            "published_at",
-            "vector_score",
+            "0",
             "DIALECT",
             "2",
         ]
+        needs_vector_score = True
+    start_query = time.perf_counter()
     raw = await redis_client.execute_command(*args)
+    query_latency_ms += (time.perf_counter() - start_query) * 1000
     if Settings.debug_search:
         raw_count = 0
         if raw:
@@ -306,54 +390,85 @@ async def search(
             except (TypeError, ValueError):
                 raw_count = 0
         LOGGER.info("search redis raw_count=%s", raw_count)
-    results = []
-    if raw and len(raw) > 1:
-        for i in range(1, len(raw), 2):
-            doc_id = raw[i].decode() if isinstance(raw[i], (bytes, bytearray)) else raw[i]
-            fields = raw[i + 1]
-            mapping = {
-                fields[j].decode(): fields[j + 1].decode()
-                for j in range(0, len(fields), 2)
-            }
-            authors_raw = mapping.get("authors", "")
-            authors = [item.strip() for item in authors_raw.split(",") if item.strip()]
-            content = mapping.get("content", "")
-            results.append(
-                SearchResult(
-                    doc_id=doc_id,
-                    title=mapping.get("title", ""),
-                    url=mapping.get("url", ""),
-                    snippet=_make_snippet(content, query),
-                    authors=authors,
-                    company=mapping.get("company", ""),
-                    published_at=mapping.get("published_at") or None,
-                    score=float(mapping.get("vector_score", "0")),
-                )
+    doc_keys = _decode_doc_ids(raw)
+    if not doc_keys:
+        SEARCH_LATENCY_MS.observe(query_latency_ms)
+        return [], query_latency_ms
+    results: list[SearchResult] = []
+    doc_items: list[tuple[str, dict[str, object]]] = []
+    if doc_cache is None:
+        pipe = redis_client.pipeline()
+        for doc_key in doc_keys:
+            pipe.hgetall(doc_key)
+        raw_docs = await pipe.execute()
+        keep_bytes = {"embedding"} if needs_vector_score else None
+        for doc_key, raw_doc in zip(doc_keys, raw_docs):
+            if not raw_doc:
+                continue
+            mapping = _decode_hash(raw_doc, keep_bytes=keep_bytes)
+            doc_items.append((doc_key, mapping))
+    else:
+        for doc_key in doc_keys:
+            mapping = doc_cache.get(doc_key)
+            if not mapping:
+                continue
+            doc_items.append((doc_key, mapping))
+    for doc_key, mapping in doc_items:
+        score = 0.0
+        if needs_vector_score and embedding is not None:
+            embedding_raw = mapping.get("embedding")
+            doc_vector = _bytes_to_vector(embedding_raw)
+            try:
+                doc_vector = normalize_embedding(doc_vector, Settings.embeddings_dim)
+            except ValueError:
+                continue
+            score = _cosine_similarity(embedding, doc_vector)
+        results.append(
+            _result_from_mapping(
+                mapping,
+                doc_key=doc_key,
+                query=query,
+                score=score,
             )
-    SEARCH_LATENCY_MS.observe((time.time() - start) * 1000)
-    return results
+        )
+    if needs_vector_score:
+        results.sort(key=lambda item: item.score, reverse=True)
+        results = results[:limit]
+    SEARCH_LATENCY_MS.observe(query_latency_ms)
+    return results, query_latency_ms
 
 
 async def _search_pylate(
-    redis_client: redis.Redis, query: str, limit: int
-) -> list[SearchResult]:
+    redis_client: redis.Redis,
+    query: str,
+    limit: int,
+    *,
+    doc_cache: dict[str, dict[str, object]] | None = None,
+) -> tuple[list[SearchResult], float]:
     try:
+        start_query = time.perf_counter()
         hits = pylate_retrieve(query, k=limit)
+        query_latency_ms = (time.perf_counter() - start_query) * 1000
     except ValueError as exc:
         if "index is empty" in str(exc).lower():
             if Settings.debug_search:
                 LOGGER.info("search pylate index empty")
-            return []
+            return [], 0.0
         raise
     results: list[SearchResult] = []
     for hit in hits:
         doc_id = str(hit.get("id", ""))
         if not doc_id:
             continue
-        raw = await redis_client.hgetall(f"doc:{doc_id}")
-        if not raw:
-            continue
-        mapping = _decode_hash(raw)
+        doc_key = f"doc:{doc_id}"
+        mapping: dict[str, object] | None = None
+        if doc_cache is not None:
+            mapping = doc_cache.get(doc_key)
+        if mapping is None:
+            raw = await redis_client.hgetall(doc_key)
+            if not raw:
+                continue
+            mapping = _decode_hash(raw)
         authors_raw = mapping.get("authors", "")
         authors = [item.strip() for item in authors_raw.split(",") if item.strip()]
         content = mapping.get("content", "")
@@ -369,4 +484,4 @@ async def _search_pylate(
                 score=float(hit.get("score", 0.0)),
             )
         )
-    return results
+    return results, query_latency_ms

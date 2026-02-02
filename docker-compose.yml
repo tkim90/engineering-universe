@@ -3,14 +3,11 @@ services:
     image: redis/redis-stack-server:7.4.0-v2
     ports:
       - "6379:6379"
-    volumes:
-      - redis-data:/data
     command:
       [
         "redis-stack-server",
         "--save",
-        "60",
-        "1",
+        "",
         "--appendonly",
         "no",
         "--requirepass",
@@ -68,5 +65,4 @@ services:
       - redis
     profiles: ["seed"]
 
-volumes:
-  redis-data:
+volumes: {}

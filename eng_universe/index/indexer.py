@@ -144,7 +144,9 @@ async def create_search_index(redis_client: redis.Redis, index_name: str) -> Non
         ):
             if name in keyword_names:
                 continue
-            schema.extend(_schema_for_field(KeywordFieldConfig(name=name, field_type=field_type)))
+            schema.extend(
+                _schema_for_field(KeywordFieldConfig(name=name, field_type=field_type))
+            )
         if not Settings.keyword_only and provider_name not in {"pylate", "colbert"}:
             schema.extend(
                 [
@@ -168,6 +170,7 @@ async def create_search_index(redis_client: redis.Redis, index_name: str) -> Non
             "PREFIX",
             "1",
             "doc:",
+            "NOOFFSETS",  # Skip term offsets (saves memory, disables search result highlighting)
             "SCHEMA",
             *schema,
         )
